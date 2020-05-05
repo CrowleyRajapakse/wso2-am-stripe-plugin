@@ -43,36 +43,27 @@ import org.wso2.carbon.apimgt.api.model.APIIdentifier;
 import org.wso2.carbon.apimgt.api.model.APIProduct;
 import org.wso2.carbon.apimgt.api.model.Subscriber;
 import org.wso2.carbon.apimgt.impl.APIConstants;
-import org.wso2.carbon.apimgt.impl.APIManagerConfiguration;
 import org.wso2.carbon.apimgt.impl.dao.ApiMgtDAO;
-import org.wso2.carbon.apimgt.impl.dto.JWTConfigurationDto;
 import org.wso2.carbon.apimgt.impl.dto.SubscriptionWorkflowDTO;
 import org.wso2.carbon.apimgt.impl.dto.WorkflowDTO;
 import org.wso2.carbon.apimgt.impl.internal.ServiceReferenceHolder;
-import org.wso2.carbon.apimgt.impl.notification.NotifierConstants;
-import org.wso2.carbon.apimgt.impl.token.ClaimsRetriever;
-import org.wso2.carbon.apimgt.impl.utils.APIUtil;
 import org.wso2.carbon.apimgt.impl.workflow.*;
 import org.wso2.carbon.registry.core.Registry;
 import org.wso2.carbon.registry.core.Resource;
 import org.wso2.carbon.registry.core.exceptions.RegistryException;
 
 import java.nio.charset.Charset;
-import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.SortedMap;
 
 /**
  * worrkflow executor for stripe based subscription create action
  */
-public class StripeSubscriptionCreationWorkflowExecutor extends WorkflowExecutor {
+public class StripeSubscriptionCreationWorkflowExecutorSimple extends WorkflowExecutor {
 
     private static final Log log = LogFactory.getLog(StripeSubscriptionCreationWorkflowExecutor.class);
     StripeMonetizationDAO stripeMonetizationDAO = StripeMonetizationDAO.getInstance();
-    private String fromEmailAddress;
-    private  String fromEmailPassword;
 
     @Override
     public String getWorkflowType() {
@@ -94,69 +85,12 @@ public class StripeSubscriptionCreationWorkflowExecutor extends WorkflowExecutor
     @Override
     public WorkflowResponse execute(WorkflowDTO workflowDTO) throws WorkflowException {
 
-//        super.execute(workflowDTO);
-//        workflowDTO.setStatus(WorkflowStatus.APPROVED);
-//        WorkflowResponse workflowResponse = complete(workflowDTO);
-//        super.publishEvents(workflowDTO);
-//
-//        return new GeneralWorkflowResponse();
-        String subscriber = ((SubscriptionWorkflowDTO) workflowDTO).getSubscriber();
+        super.execute(workflowDTO);
+        workflowDTO.setStatus(WorkflowStatus.APPROVED);
+        WorkflowResponse workflowResponse = complete(workflowDTO);
+        super.publishEvents(workflowDTO);
 
-        try {
-            if (ApprovalManager.isPriorApproved(subscriber, WorkflowConstants.WF_TYPE_AM_SUBSCRIPTION_CREATION)) {
-                StripeSubscriptionCreationWorkflowExecutorSimple simpleExecutor = new StripeSubscriptionCreationWorkflowExecutorSimple();
-                return simpleExecutor.execute(workflowDTO);
-            }
-
-            ApprovalManager.recordApprovalRequest(subscriber, WorkflowConstants.WF_TYPE_AM_SUBSCRIPTION_CREATION,
-                    workflowDTO.getExternalWorkflowReference(), workflowDTO.getStatus());
-        } catch (SQLException e) {
-            throw new WorkflowException("Error during OneTimeSubscriptionApproval workflow execution flow", e);
-        }
-
-        return super.execute(workflowDTO);
-    }
-
-    private String getSubscriberEmail(String username) {
-        APIManagerConfiguration configuration = ServiceReferenceHolder.getInstance().getAPIManagerConfigurationService()
-                .getAPIManagerConfiguration();
-
-        JWTConfigurationDto jwtConfigurationDto = configuration.getJwtConfigurationDto();
-        String claimRetrieverImplClass = jwtConfigurationDto.getClaimRetrieverImplClass();
-
-        if (claimRetrieverImplClass == null) {
-            claimRetrieverImplClass = "org.wso2.carbon.apimgt.impl.token.DefaultClaimsRetriever";
-        }
-
-        try {
-            ClaimsRetriever claimsRetriever = (ClaimsRetriever) APIUtil.getClassForName(
-                    claimRetrieverImplClass).newInstance();
-            claimsRetriever.init();
-            SortedMap<String, String> claims = claimsRetriever.getClaims(username);
-
-            if (claims != null) {
-                if (claims.containsKey(NotifierConstants.EMAIL_CLAIM)) {
-                    return claims.get(NotifierConstants.EMAIL_CLAIM);
-                }
-            }
-        } catch (InstantiationException | IllegalAccessException | ClassNotFoundException | APIManagementException e) {
-            log.error("Error while getting subscriber email", e);
-        }
-
-        return "";
-    }
-
-    public String getfromEmailAddress() {
-        return fromEmailAddress;
-    }
-    public void setFromEmailAddress(String emailAddress) {
-        this.fromEmailAddress = emailAddress;
-    }
-    public String getFromEmailPassword() {
-        return fromEmailPassword;
-    }
-    public void setFromEmailPassword(String emailPassword) {
-        this.fromEmailPassword = emailPassword;
+        return new GeneralWorkflowResponse();
     }
 
     /**
@@ -536,43 +470,15 @@ public class StripeSubscriptionCreationWorkflowExecutor extends WorkflowExecutor
     @Override
     public WorkflowResponse complete(WorkflowDTO workflowDTO) throws WorkflowException {
 
-//        ApiMgtDAO apiMgtDAO = ApiMgtDAO.getInstance();
-//        try {
-//            apiMgtDAO.updateSubscriptionStatus(Integer.parseInt(workflowDTO.getWorkflowReference()),
-//                    APIConstants.SubscriptionStatus.UNBLOCKED);
-//        } catch (APIManagementException e) {
-//            log.error("Could not complete subscription creation workflow", e);
-//            throw new WorkflowException("Could not complete subscription creation workflow", e);
-//        }
-//        return new GeneralWorkflowResponse();
-        WorkflowResponse response = super.complete(workflowDTO);
-        String subscriber;
-
+        ApiMgtDAO apiMgtDAO = ApiMgtDAO.getInstance();
         try {
-            subscriber = ApprovalManager.getApproveRequestUser(workflowDTO.getExternalWorkflowReference());
-            ApprovalManager.updateApprovalStatus(workflowDTO.getExternalWorkflowReference(), workflowDTO.getStatus());
-        } catch (SQLException e) {
-            throw new WorkflowException("Error during OneTimeSubscriptionApproval workflow completion flow", e);
+            apiMgtDAO.updateSubscriptionStatus(Integer.parseInt(workflowDTO.getWorkflowReference()),
+                    APIConstants.SubscriptionStatus.UNBLOCKED);
+        } catch (APIManagementException e) {
+            log.error("Could not complete subscription creation workflow", e);
+            throw new WorkflowException("Could not complete subscription creation workflow", e);
         }
-
-        if (!subscriber.isEmpty()) {
-            String toEmail = getSubscriberEmail(subscriber);
-
-            if (toEmail != null && !toEmail.isEmpty()) {
-                SubscriptionWorkflowDTO subsWorkflowDTO = (SubscriptionWorkflowDTO) workflowDTO;
-                String api = subsWorkflowDTO.getApiName() + "-" + subsWorkflowDTO.getApiVersion();
-                String subject = "You have successfully subscribed to " + api;
-                StringBuilder content = new StringBuilder();
-                content.append(subject)
-                        .append("\n\n")
-                        .append("Please access the developer portal to generate keys in order to start consuming the API")
-                        .append("\n\n")
-                        .append("To report issues or engage with the community please https://github.com/" + api);
-                EmailSender.sendEmail(toEmail, getfromEmailAddress(), getFromEmailPassword(), subject, content.toString());
-            }
-        }
-
-        return response;
+        return new GeneralWorkflowResponse();
     }
 
 }
